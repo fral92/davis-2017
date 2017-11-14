@@ -25,84 +25,93 @@ _db_measures = {
         'T': measures.db_eval_boundary,
         }
 
-def db_eval_sequence(segmentations,annotations,measure='J',n_jobs=cfg.N_JOBS):
 
-  """
-  Evaluate video sequence results.
+def db_eval_sequence(segmentations, annotations, measure='J',
+                     n_jobs=cfg.N_JOBS):
 
-	Arguments:
-		segmentations (list of ndarrya): segmentations masks.
-		annotations   (list of ndarrya): ground-truth  masks.
-    measure       (char): evaluation metric (J,F,T)
-    n_jobs        (int) : number of CPU cores.
+    """
+    Evaluate video sequence results.
 
-  Returns:
-    results (list): ['raw'] per-frame, per-object sequence results.
-  """
+    Arguments:
+        segmentations (list of ndarrya): segmentations masks.
+        annotations   (list of ndarrya): ground-truth  masks.
+        measure       (char): evaluation metric (J,F,T)
+        n_jobs        (int) : number of CPU cores.
 
-  results = {'raw':[]}
-  for obj_id in annotations.iter_objects_id():
-    results['raw'].append(Parallel(n_jobs=n_jobs)(delayed(_db_measures[measure])(
-      an==obj_id,sg==obj_id) for an,sg in zip(annotations[1:-1],segmentations[1:-1])))
+    Returns:
+        results (list): ['raw'] per-frame, per-object sequence results.
+    """
 
-  for stat,stat_fuc in measures._statistics.iteritems():
-    results[stat] = [float(stat_fuc(r)) for r in results['raw']]
+    results = {'raw': []}
+    for obj_id in annotations.iter_objects_id():
+        results['raw'].append(
+            Parallel(n_jobs=n_jobs)(delayed(_db_measures[measure])(
+                an == obj_id, sg == obj_id) for an, sg in zip(
+                    annotations[1:-1], segmentations[1:-1])))
 
-  # Convert to 'float' to save correctly in yaml format
-  for r in range(len(results['raw'])):
-    results['raw'][r] = [float(v) for v in results['raw'][r]]
+    for stat, stat_fuc in measures._statistics.iteritems():
+        results[stat] = [float(stat_fuc(r)) for r in results['raw']]
 
-  results['raw'] = [[np.nan]+r+[np.nan] for r in results['raw']]
+    # Convert to 'float' to save correctly in yaml format
+    for r in range(len(results['raw'])):
+        results['raw'][r] = [float(v) for v in results['raw'][r]]
 
-  return results
+    results['raw'] = [[np.nan]+r+[np.nan] for r in results['raw']]
 
-def db_eval(db,segmentations,measures,n_jobs=cfg.N_JOBS,verbose=True):
+    return results
 
-  """
-  Evaluate video sequence results.
 
-	Arguments:
-		segmentations (list of ndarrya): segmentations masks.
-		annotations   (list of ndarrya): ground-truth  masks.
-    measure       (char): evaluation metric (J,F,T)
-    n_jobs        (int) : number of CPU cores.
+def db_eval(subsets, segmentations, annotations,
+            measures, statistics, n_jobs=cfg.N_JOBS, verbose=True):
 
-  Returns:
-    results (dict): [sequence]: per-frame sequence results.
-                    [dataset] : aggreated dataset results.
-  """
+    """
+    Evaluate video sequence results.
 
-  s_eval = defaultdict(dict)  # sequence evaluation
-  d_eval = defaultdict(dict)  # dataset  evaluation
+    Arguments:
+        segmentations (list of ndarrya): segmentations masks.
+        annotations   (list of ndarrya): ground-truth  masks.
+        measure       (char): evaluation metric (J,F,T)
+        n_jobs        (int) : number of CPU cores.
 
-  for measure in measures:
-    log.info("Evaluating measure: {}".format(measure))
-    for sid in range(len(db)):
-      sg = segmentations[sid]
-      s_eval[sg.name][measure] = db_eval_sequence(sg,
-          db[sg.name].annotations,measure=measure,n_jobs=n_jobs)
+    Returns:
+        results (dict): [sequence]: per-frame sequence results.
+                        [dataset] : aggreated dataset results.
+    """
 
-    for statistic in cfg.EVAL.STATISTICS:
-      raw_data = np.hstack([s_eval[sequence][measure][statistic] for sequence in
-        s_eval.keys()])
-      d_eval[measure][statistic] = float(np.mean(raw_data))
+    s_eval = defaultdict(dict)  # sequence evaluation
+    d_eval = defaultdict(dict)  # dataset  evaluation
 
-  g_eval = {'sequence':dict(s_eval),'dataset':dict(d_eval)}
+    for measure in measures:
+        for subset in subsets:
+            print("Evaluating measure: {}, on subset:{}".format(measure,
+                                                                subset))
+            s_eval[subset][measure] = db_eval_sequence(
+                np.squeeze(segmentations[subset]),
+                np.squeeze(annotations[subset]), measure=measure,
+                n_jobs=n_jobs)
 
-  return g_eval
+        for statistic in statistics:
+            raw_data = np.hstack(
+                [s_eval[sequence][measure][statistic] for sequence in s_eval.keys()])
+            d_eval[measure][statistic] = float(np.mean(raw_data))
 
-def print_results(evaluation,method_name="-"):
-  """Print result in a table"""
+    g_eval = {'sequence': dict(s_eval), 'dataset': dict(d_eval)}
 
-  metrics = evaluation['dataset'].keys()
+    return g_eval
 
-  # Print results
-  table = PrettyTable(['Method']+[p[0]+'_'+p[1] for p in
-    itertools.product(metrics,cfg.EVAL.STATISTICS)])
 
-  table.add_row([method_name]+["%.3f"%np.round(
-    evaluation['dataset'][metric][statistic],3) for metric,statistic in
-    itertools.product(metrics,cfg.EVAL.STATISTICS)])
+def print_results(evaluation, method_name="-"):
+    """Print result in a table"""
 
-  print "\n{}\n".format(str(table))
+    metrics = evaluation['dataset'].keys()
+
+    # Print results
+    table = PrettyTable(['Method']+[p[0]+'_'+p[1] for p in
+                                    itertools.product(metrics, cfg.EVAL.STATISTICS)])
+
+    table.add_row([method_name]+["%.3f" % np.round(
+        evaluation['dataset'][metric][statistic], 3) for metric, statistic in
+        itertools.product(metrics, cfg.EVAL.STATISTICS)])
+
+    print "\n{}\n".format(str(table))
 
